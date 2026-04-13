@@ -159,6 +159,68 @@ input:focus,select:focus,textarea:focus{outline:none;border-color:var(--gold-bd)
 .mo-chip{flex-shrink:0;padding:5px 12px;font-size:11px;cursor:pointer;border-radius:20px;border:1px solid var(--bd);background:transparent;color:var(--ink3);margin-right:5px;white-space:nowrap;transition:all .13s}
 .mo-chip.sel{background:var(--gold-dim);border-color:var(--gold-lt);color:var(--gold2);font-weight:500}
 </style>
+<script type="module">
+import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-app.js";
+import { getFirestore, doc, setDoc, getDoc, onSnapshot } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore.js";
+ 
+const firebaseConfig = {
+  apiKey: "AIzaSyDaDxMqz7mZ_JrB_FQEjECH32vZnCCwuEE",
+  authDomain: "changkeb-1621a.firebaseapp.com",
+  projectId: "changkeb-1621a",
+  storageBucket: "changkeb-1621a.firebasestorage.app",
+  messagingSenderId: "992415639056",
+  appId: "1:992415639056:web:7db0a5bc6f9d2e15ac0c95",
+  measurementId: "G-RJGY2MT7V5"
+};
+ 
+const app = initializeApp(firebaseConfig);
+const db = getFirestore(app);
+const DATA_DOC = doc(db, 'cardflow', 'data');
+ 
+// Expose to global scope for use by main script
+window._fbSave = async (state) => {
+  try {
+    await setDoc(DATA_DOC, { payload: JSON.stringify(state) });
+    window._setSS('saved');
+  } catch(e) {
+    console.error('Firebase save error:', e);
+    window._setSS('error');
+    // Fallback to localStorage
+    try { localStorage.setItem('cf3', JSON.stringify(state)); } catch(e2) {}
+  }
+};
+ 
+window._fbLoad = async () => {
+  try {
+    const snap = await getDoc(DATA_DOC);
+    if (snap.exists()) {
+      return JSON.parse(snap.data().payload);
+    }
+  } catch(e) {
+    console.error('Firebase load error:', e);
+  }
+  // Fallback to localStorage
+  try {
+    const r = localStorage.getItem('cf3');
+    return r ? JSON.parse(r) : null;
+  } catch(e) { return null; }
+};
+ 
+// Real-time listener — sync across devices instantly
+window._fbListen = (callback) => {
+  return onSnapshot(DATA_DOC, (snap) => {
+    if (snap.exists() && snap.metadata.hasPendingWrites === false) {
+      try {
+        const data = JSON.parse(snap.data().payload);
+        callback(data);
+      } catch(e) {}
+    }
+  });
+};
+ 
+window._fbReady = true;
+document.dispatchEvent(new Event('fb-ready'));
+</script>
 </head>
 <body>
 <div id="app">
@@ -219,21 +281,49 @@ let S={
   threshold:25000
 };
  
-/* ══ STORAGE ══ */
+/* ══ STORAGE (Firebase + localStorage fallback) ══ */
 const SK='cf3';
 let svTimer=null;
-function load(){try{const r=localStorage.getItem(SK);if(r)Object.assign(S,JSON.parse(r));}catch(e){}}
-function save(){
-  setSS('saving');clearTimeout(svTimer);
-  svTimer=setTimeout(()=>{
-    try{localStorage.setItem(SK,JSON.stringify(S));setSS('saved');}
-    catch(e){setSS('error');}
-  },500);
-}
+let _unsubscribe=null;
+let _lastSaveTime=0;
+ 
 function setSS(s){
   const d=document.getElementById('sdot'),t=document.getElementById('stxt');
   if(!d)return;d.className='sdot '+s;
-  t.textContent=s==='saved'?'บันทึกแล้ว':s==='saving'?'บันทึก...':'Error';
+  t.textContent=s==='saved'?'Sync แล้ว':s==='saving'?'กำลัง Sync...':'Error';
+}
+window._setSS=setSS;
+ 
+function save(){
+  setSS('saving');
+  clearTimeout(svTimer);
+  _lastSaveTime=Date.now();
+  svTimer=setTimeout(async()=>{
+    // Always save to localStorage as backup
+    try{localStorage.setItem(SK,JSON.stringify(S));}catch(e){}
+    // Save to Firebase if ready
+    if(window._fbSave){
+      await window._fbSave(S);
+    } else {
+      setSS('saved');
+    }
+  },600);
+}
+ 
+function load(){
+  // localStorage fallback while Firebase loads
+  try{const r=localStorage.getItem(SK);if(r)Object.assign(S,JSON.parse(r));}catch(e){}
+}
+ 
+function startSync(){
+  if(!window._fbListen)return;
+  if(_unsubscribe)_unsubscribe();
+  _unsubscribe=window._fbListen((data)=>{
+    // Only apply remote changes if not from our own recent save
+    if(Date.now()-_lastSaveTime<2000)return;
+    Object.assign(S,data);
+    render();
+  });
 }
  
 /* ══ CC CALC ══ */
@@ -719,7 +809,7 @@ function rSettings(c){
       <button class="btn-ghost" style="text-align:left;padding:10px 13px;font-size:13px" onclick="document.getElementById('imp').click()">นำเข้า JSON<input type="file" id="imp" accept=".json" style="display:none" onchange="importData(this)"></button>
       <button class="btn-danger" style="padding:10px 13px;font-size:13px;text-align:left;width:100%" onclick="confirmReset()">รีเซ็ตข้อมูลทั้งหมด</button>
     </div>
-    <div style="margin-top:10px;font-size:10.5px;color:var(--ink3);line-height:1.7">บันทึกอัตโนมัติใน Local Storage · Export JSON เพื่อสำรองข้อมูล</div>
+    <div style="margin-top:10px;font-size:10.5px;color:var(--ink3);line-height:1.7">Sync อัตโนมัติผ่าน Firebase · ใช้ได้ทุกอุปกรณ์ · Export JSON เพื่อสำรองข้อมูล</div>
   </div>`;
 }
 function addCat(){
@@ -1033,10 +1123,34 @@ function importData(inp){
   const f=inp.files[0];if(!f)return;
   const r=new FileReader();r.onload=e=>{try{Object.assign(S,JSON.parse(e.target.result));save();cls();render();}catch{alert('ไฟล์ไม่ถูกต้อง');}};r.readAsText(f);
 }
-function confirmReset(){confirm2('รีเซ็ตทั้งหมด?','ข้อมูลจะหายถาวร ควร Export ก่อน',()=>{localStorage.removeItem(SK);location.reload();});}
+function confirmReset(){confirm2('รีเซ็ตทั้งหมด?','ข้อมูลจะหายถาวร ควร Export ก่อน',async()=>{
+  localStorage.removeItem(SK);
+  if(window._fbSave){
+    const empty={cards:[],ccTxs:[],incomes:[],expenses:[],goals:[],expCats:[...EXP_CATS_DEF],threshold:25000};
+    await window._fbSave(empty);
+  }
+  location.reload();
+});
+}
  
 /* ══ INIT ══ */
-load();render();
+load(); // load localStorage first (instant)
+render(); // render immediately
+ 
+// When Firebase is ready, load from cloud and start sync
+async function initFirebase(){
+  if(window._fbLoad){
+    const data=await window._fbLoad();
+    if(data){Object.assign(S,data);render();}
+    startSync();
+  }
+}
+ 
+if(window._fbReady){
+  initFirebase();
+} else {
+  document.addEventListener('fb-ready',initFirebase);
+}
 </script>
 </body>
 </html>
