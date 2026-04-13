@@ -567,6 +567,70 @@ function rOverview(c){
     </div>
   </div>`;
  
+  // ── Combined category breakdown (cash + CC merged) ──
+  const CAT_PALETTE=['#8B6914','#3D7A6E','#7A4E7A','#3D5F8B','#8B4A3A','#4A7A3A','#6B6B6B','#855070','#507085'];
+  const allCatMap={};
+  // from cash expenses
+  expItems.forEach(e=>{allCatMap[e.cat]=(allCatMap[e.cat]||{cash:0,cc:0});allCatMap[e.cat].cash+=e.amount;});
+  // from CC transactions this month
+  S.ccTxs.forEach(tx=>{
+    const card2=S.cards.find(x=>x.id===tx.cardId);if(!card2)return;
+    sched(tx,card2).filter(s=>s.m===sm&&s.y===sy).forEach(s=>{
+      const cat=tx.cat||'อื่นๆ';
+      allCatMap[cat]=(allCatMap[cat]||{cash:0,cc:0});
+      allCatMap[cat].cc+=s.a;
+    });
+  });
+  const totalExp2=cashE+ccE;
+  const allCatList=Object.entries(allCatMap)
+    .map(([cat,v])=>({cat,cash:v.cash,cc:v.cc,total:v.cash+v.cc}))
+    .sort((a,b)=>b.total-a.total);
+ 
+  if(allCatList.length>0){
+    c.innerHTML+=`<div class="card">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px">
+        <div class="sec-t" style="margin:0">รายจ่ายตามหมวด ${MO[sm]}</div>
+        <span style="font-size:10px;color:var(--ink3)">สด + บัตร รวม</span>
+      </div>
+      <!-- stacked horizontal legend -->
+      <div style="height:10px;border-radius:5px;overflow:hidden;display:flex;margin-bottom:10px;gap:1px">
+        ${allCatList.map(({cat,total},i)=>{
+          const pct=totalExp2>0?total/totalExp2*100:0;
+          const col=CAT_PALETTE[i%CAT_PALETTE.length];
+          return pct>1?`<div style="flex:${pct};background:${col};opacity:.85" title="${cat}"></div>`:'';
+        }).join('')}
+      </div>
+      <!-- rows -->
+      ${allCatList.map(({cat,cash,cc,total},i)=>{
+        const pct=totalExp2>0?Math.round(total/totalExp2*100):0;
+        const col=CAT_PALETTE[i%CAT_PALETTE.length];
+        return`<div style="margin-bottom:9px">
+          <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:3px">
+            <div style="display:flex;align-items:center;gap:6px;min-width:0">
+              <span style="width:8px;height:8px;border-radius:50%;background:${col};flex-shrink:0;display:inline-block"></span>
+              <span style="font-size:12.5px;color:var(--ink);white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${cat}</span>
+              <span style="display:flex;gap:4px;flex-shrink:0">
+                ${cash>0?`<span style="font-size:9px;padding:1px 5px;border-radius:20px;background:var(--red-dim);color:var(--red);border:1px solid var(--red-bd)">สด ฿${fmt(cash)}</span>`:''}
+                ${cc>0?`<span style="font-size:9px;padding:1px 5px;border-radius:20px;background:rgba(122,78,122,.08);color:#7A4E7A;border:1px solid rgba(122,78,122,.2)">บัตร ฿${fmt(cc)}</span>`:''}
+              </span>
+            </div>
+            <div style="display:flex;align-items:center;gap:5px;flex-shrink:0;margin-left:8px">
+              <span style="font-family:'Playfair Display',serif;font-size:14px;color:var(--ink)">฿${fmt(total)}</span>
+              <span style="font-size:10px;color:var(--ink3);min-width:28px;text-align:right">${pct}%</span>
+            </div>
+          </div>
+          <div style="height:5px;background:var(--bg3);border-radius:3px;overflow:hidden">
+            <div style="height:100%;width:${pct}%;background:${col};opacity:.75;border-radius:3px;transition:width .4s"></div>
+          </div>
+        </div>`;
+      }).join('')}
+      <div style="border-top:1px solid var(--bd);padding-top:8px;margin-top:4px;display:flex;justify-content:space-between">
+        <span style="font-size:12px;color:var(--ink2)">รวมทั้งหมด</span>
+        <span style="font-family:'Playfair Display',serif;font-size:15px;color:var(--ink)">฿${fmt(totalExp2)}</span>
+      </div>
+    </div>`;
+  }
+ 
   // Quick add
   c.innerHTML+=`<div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:7px">
     <button class="btn btn-grn" style="font-size:12px;padding:10px 4px" onclick="openAddIncome()">+ รายรับ</button>
